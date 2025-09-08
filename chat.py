@@ -41,18 +41,63 @@ def run_conversation(user_input):
 # ==========================
 # Voice Input Function
 # ==========================
-def speech_to_text():
-    recognizer = sr.Recognizer()
-    mic = sr.Microphone()
-    with mic as source:
-        st.info("🎤 Listening... Speak now")
-        audio = recognizer.listen(source, phrase_time_limit=5)
-    try:
-        return recognizer.recognize_google(audio)
-    except:
-        return None
+import streamlit as st
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+import speech_recognition as sr
+import av
 
-# ==========================
+recognizer = sr.Recognizer()
+
+# 🎙️ Streamlit WebRTC speech-to-text
+
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+import speech_recognition as sr
+import av
+import numpy as np
+
+recognizer = sr.Recognizer()
+
+def speech_to_text():
+    class SpeechToTextProcessor(AudioProcessorBase):
+        def __init__(self) -> None:
+            self.audio_frames = []
+
+        def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
+            # Collect audio frames into a buffer
+            self.audio_frames.append(frame.to_ndarray().flatten())
+            return frame
+
+    # Start mic capture
+    ctx = webrtc_streamer(
+        key="speech-to-text",
+        mode=WebRtcMode.SENDONLY,
+        audio_processor_factory=SpeechToTextProcessor,
+        media_stream_constraints={"audio": True, "video": False},
+    )
+
+    text = None
+    if ctx.audio_processor:
+        if st.button("🎙️ Transcribe now"):
+            if ctx.audio_processor.audio_frames:
+                # Combine buffered frames
+                audio_data = np.concatenate(ctx.audio_processor.audio_frames).astype("int16")
+
+                # Convert to speech_recognition AudioData
+                audio = sr.AudioData(audio_data.tobytes(), sample_rate=16000, sample_width=2)
+
+                try:
+                    text = recognizer.recognize_google(audio)
+                    st.success(f"🗣️ You said: {text}")
+                except Exception as e:
+                    st.error(f"Recognition error: {e}")
+
+                # Reset buffer
+                ctx.audio_processor.audio_frames = []
+            else:
+                st.warning("⚠️ No audio captured yet. Please speak into the mic first.")
+
+    return text
+
 # Streamlit UI
 # ==========================
 st.title("🛎️ Customer Service Agent")
@@ -92,4 +137,5 @@ elif mode == "Voice":
             )
         else:
             st.error("⚠️ Could not recognize speech. Please try again.")
+
 
