@@ -123,6 +123,9 @@ if mode == "Text":
 # --------------------------
 # Voice Mode with Start + Transcribe
 # --------------------------
+# --------------------------
+# Voice Mode
+# --------------------------
 elif mode == "Voice":
     import numpy as np
     import av
@@ -130,22 +133,21 @@ elif mode == "Voice":
     from vosk import Model, KaldiRecognizer
     import json
 
-    # Load Vosk model (already downloaded as "model")
+    # Load Vosk model
     model = Model("model")
 
-    class VoskAudioProcessor(AudioProcessorBase):
-        def __init__(self) -> None:
-            self.frames = []
+    # Persistent list to store audio frames
+    if "audio_frames" not in st.session_state:
+        st.session_state.audio_frames = []
 
+    class VoskAudioProcessor(AudioProcessorBase):
         def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
             audio = frame.to_ndarray().flatten()
             audio_int16 = (audio * 32767).astype(np.int16)
-            self.frames.append(audio_int16)
+            st.session_state.audio_frames.append(audio_int16)
             return frame
 
-    st.title("🎙️ Live Voice Customer Service Agent")
-
-    # Start/stop streaming
+    # Start WebRTC streaming
     ctx = webrtc_streamer(
         key="live-voice",
         mode=WebRtcMode.SENDONLY,
@@ -154,10 +156,12 @@ elif mode == "Voice":
         async_processing=True,
     )
 
-    # Button to transcribe captured audio
+    st.info("🎙️ Press 'Transcribe' when done speaking.")
+
+    # Transcribe button
     if st.button("Transcribe"):
-        if ctx.audio_processor and ctx.audio_processor.frames:
-            frames = np.concatenate(ctx.audio_processor.frames)
+        if st.session_state.audio_frames:
+            frames = np.concatenate(st.session_state.audio_frames)
             recognizer = KaldiRecognizer(model, 16000)
             recognizer.SetWords(True)
 
@@ -168,6 +172,6 @@ elif mode == "Voice":
                 text = json.loads(recognizer.PartialResult()).get("partial", "")
 
             st.success(f"You said: {text}")
-            ctx.audio_processor.frames = []  # clear after processing
+            st.session_state.audio_frames = []  # clear after processing
         else:
-            st.warning("⚠️ No audio captured yet. Press 'Start' and speak.")
+            st.warning("⚠️ No audio captured yet. Speak and then press 'Transcribe'.")
