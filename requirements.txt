@@ -10,5 +10,5 @@ streamlit-webrtc
 av
 vosk
 sounddevice
-pyaudio
 wget
+
