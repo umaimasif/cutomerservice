@@ -3,6 +3,6 @@ gtts
 speechrecognition
 pydub
 python-dotenv
-langchain-google-genai
+langchain_groq
 litellm
 langchain

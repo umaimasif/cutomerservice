@@ -1,7 +1,7 @@
 # streamlit_chat_text_or_voice.py
 import streamlit as st
 import speech_recognition as sr
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from litellm import completion
 from langchain.schema import HumanMessage
 
@@ -13,14 +13,14 @@ import os
 
 load_dotenv()  # Load .env file
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
-class GroqLLM(ChatGoogleGenerativeAI):
+
+class GroqLLM(ChatGroq):
     def __init__(self, **kwargs):
-        super().__init__(model="gemini-1.5-flash", **kwargs)
+        super().__init__(model="groq\llama-3.1-8b-instant", **kwargs)
 
     def _call(self, prompt: str, stop=None) -> str:
         messages = [{"role": "user", "content": prompt}]
-        response = completion(model="gemini-1.5-flash", messages=messages)
+        response = completion(model="groq\llama-3.1-8b-instant", messages=messages)
         return response["choices"][0]["message"]["content"]
 
 llm = GroqLLM()
