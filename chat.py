@@ -120,19 +120,70 @@ if mode == "Text":
 # --------------------------
 # Voice Mode
 # --------------------------
+# --------------------------
+# Voice Mode with Start + Transcribe
+# --------------------------
 elif mode == "Voice":
-    st.write("🎙️ Speak now! Recording is live from your browser.")
+    st.write("🎙️ Voice Mode")
 
-    if st.button("Transcribe & Send"):
-        user_input = get_live_transcription()
-        if user_input:
-            st.success(f"You said: {user_input}")
-            response = run_conversation(user_input)
-            st.text_area(
-                "Conversation",
-                value="\n".join([f"You: {m['content']}" if m['role'] == 'user' else f"AI: {m['content']}" for m in st.session_state.memory]),
-                height=300
+    if "recording_started" not in st.session_state:
+        st.session_state.recording_started = False
+
+    # Start button
+    if st.button("Start Listening"):
+        st.session_state.recording_started = True
+        st.info("🎧 Listening... Speak now!")
+
+    # Show WebRTC player only if recording started
+    if st.session_state.recording_started:
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+        import av
+        import numpy as np
+
+        class VoskAudioProcessor(AudioProcessorBase):
+            def __init__(self) -> None:
+                self.frames = []
+
+            def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
+                audio = frame.to_ndarray().flatten()
+                audio_int16 = (audio * 32767).astype(np.int16)
+                self.frames.append(audio_int16)
+                return frame
+
+        if "webrtc_ctx" not in st.session_state:
+            st.session_state.webrtc_ctx = webrtc_streamer(
+                key="live-voice",
+                mode=WebRtcMode.SENDONLY,
+                audio_processor_factory=VoskAudioProcessor,
+                media_stream_constraints={"audio": True, "video": False},
+                async_processing=True,
             )
-        else:
-            st.warning("⚠️ No voice detected. Please speak clearly.")
 
+        # Transcribe button
+        if st.button("Send / Transcribe"):
+            ctx = st.session_state.webrtc_ctx
+            if ctx.audio_processor and ctx.audio_processor.frames:
+                frames = np.concatenate(ctx.audio_processor.frames)
+                from vosk import Model, KaldiRecognizer
+                import json
+
+                recognizer = KaldiRecognizer(model, 16000)
+                recognizer.SetWords(True)
+                text = ""
+                audio_bytes = frames.tobytes()
+                if recognizer.AcceptWaveform(audio_bytes):
+                    text = json.loads(recognizer.Result()).get("text", "")
+                else:
+                    text = json.loads(recognizer.PartialResult()).get("partial", "")
+
+                st.success(f"You said: {text}")
+                if text:
+                    response = run_conversation(text)
+                    st.text_area(
+                        "Conversation",
+                        value="\n".join([f"You: {m['content']}" if m['role'] == 'user' else f"AI: {m['content']}" for m in st.session_state.memory]),
+                        height=300
+                    )
+                else:
+                    st.warning("⚠️ Could not capture speech. Try again.")
+                ctx.audio_processor.frames = []  # clear after processing
