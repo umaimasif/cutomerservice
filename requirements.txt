@@ -1,7 +1,4 @@
 streamlit
-gtts
-speechrecognition
-pydub
 python-dotenv
 langchain_groq
 litellm
@@ -9,6 +6,12 @@ langchain
 streamlit-webrtc
 av
 vosk
-sounddevice
+numpy
 wget
+
+
+
+
+
+
 

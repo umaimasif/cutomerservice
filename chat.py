@@ -1,17 +1,17 @@
 # streamlit_chat_text_or_voice.py
+# streamlit_chat_text_or_voice_live.py
 import streamlit as st
-import speech_recognition as sr
 from langchain_groq import ChatGroq
 from litellm import completion
-from langchain.schema import HumanMessage
+from dotenv import load_dotenv
+import os
+import json
+import numpy as np
 
 # ==========================
 # LLM Wrapper
 # ==========================
-from dotenv import load_dotenv
-import os
-
-load_dotenv()  # Load .env file
+load_dotenv()
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 class GroqLLM(ChatGroq):
@@ -39,111 +39,63 @@ def run_conversation(user_input):
     return output
 
 # ==========================
-# Voice Input Function
+# Vosk Model Setup
 # ==========================
-# (your imports + GroqLLM + run_conversation stay the same)
-import os
 import wget
 import zipfile
+from vosk import Model, KaldiRecognizer
 
-# Make sure model directory exists only once
 if not os.path.exists("model"):
     url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
     zip_path = "vosk_model.zip"
-
-    # Download
     wget.download(url, zip_path)
-
-    # Extract
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(".")
-
-    # Rename folder to "model"
     os.rename("vosk-model-small-en-us-0.15", "model")
 
-    print("✅ Vosk model downloaded and extracted.")
-
-# ==========================
-# Voice Input Function
-# ==========================
-
-
-from vosk import Model, KaldiRecognizer
-import json
-import numpy as np
-
-# Load Vosk model (make sure "model" folder exists in your project)
 model = Model("model")
 
 def speech_to_text_vosk(frames, sample_rate=16000):
-    """
-    Takes raw audio frames (numpy int16) and transcribes using Vosk.
-    """
     recognizer = KaldiRecognizer(model, sample_rate)
     recognizer.SetWords(True)
-
-    # Convert frames into raw bytes
     audio_bytes = frames.tobytes()
-
     if recognizer.AcceptWaveform(audio_bytes):
         result = json.loads(recognizer.Result())
         return result.get("text", "")
     else:
         partial = json.loads(recognizer.PartialResult())
         return partial.get("partial", "")
-from vosk import Model, KaldiRecognizer
-import json
-import pyaudio
 
-# Ensure Vosk model is downloaded at runtime (add this near the top of your code after imports)
-import os, wget, zipfile
+# ==========================
+# Streamlit WebRTC for Live Voice
+# ==========================
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+import av
 
-if not os.path.exists("model"):
-    url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-    zip_path = "vosk_model.zip"
-    wget.download(url, zip_path)
+class VoskAudioProcessor(AudioProcessorBase):
+    def __init__(self) -> None:
+        self.frames = []
 
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(".")
+    def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
+        audio = frame.to_ndarray().flatten()
+        audio_int16 = (audio * 32767).astype(np.int16)
+        self.frames.append(audio_int16)
+        return frame
 
-    os.rename("vosk-model-small-en-us-0.15", "model")
-
-# Initialize Vosk model
-model = Model("model")
-
-def speech_to_text():
-    rec = KaldiRecognizer(model, 16000)
-
-    # Start PyAudio
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16,
-                    channels=1,
-                    rate=16000,
-                    input=True,
-                    frames_per_buffer=8192)
-    stream.start_stream()
-
-    st.info("🎙️ Listening... speak now!")
-
-    text = ""
-    while True:
-        data = stream.read(4096, exception_on_overflow = False)
-        if len(data) == 0:
-            break
-        if rec.AcceptWaveform(data):
-            result = json.loads(rec.Result())
-            text = result.get("text", "")
-            break  # stop after first full sentence
-
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-
-    if text.strip():
-        return text
-    else:
-        st.warning("⚠️ Could not capture speech.")
-        return None
+def get_live_transcription():
+    ctx = webrtc_streamer(
+        key="live-voice",
+        mode=WebRtcMode.SENDONLY,
+        audio_processor_factory=VoskAudioProcessor,
+        media_stream_constraints={"audio": True, "video": False},
+        async_processing=True,
+    )
+    text = None
+    if ctx.audio_processor and ctx.audio_processor.frames:
+        frames = np.concatenate(ctx.audio_processor.frames)
+        text = speech_to_text_vosk(frames)
+        ctx.audio_processor.frames = []  # clear after processing
+    return text
 
 # ==========================
 # Streamlit UI
@@ -161,9 +113,7 @@ if mode == "Text":
         response = run_conversation(user_input)
         st.text_area(
             "Conversation",
-            value="\n".join(
-                [f"You: {m['content']}" if m['role']=='user' else f"AI: {m['content']}" for m in st.session_state.memory]
-            ),
+            value="\n".join([f"You: {m['content']}" if m['role'] == 'user' else f"AI: {m['content']}" for m in st.session_state.memory]),
             height=300
         )
 
@@ -171,17 +121,18 @@ if mode == "Text":
 # Voice Mode
 # --------------------------
 elif mode == "Voice":
-    st.write("🎙️ Start speaking below...")
+    st.write("🎙️ Speak now! Recording is live from your browser.")
 
-    user_input = speech_to_text()  # directly capture speech
+    if st.button("Transcribe & Send"):
+        user_input = get_live_transcription()
+        if user_input:
+            st.success(f"You said: {user_input}")
+            response = run_conversation(user_input)
+            st.text_area(
+                "Conversation",
+                value="\n".join([f"You: {m['content']}" if m['role'] == 'user' else f"AI: {m['content']}" for m in st.session_state.memory]),
+                height=300
+            )
+        else:
+            st.warning("⚠️ No voice detected. Please speak clearly.")
 
-    if user_input:  # If speech recognized
-        st.success(f"You said: {user_input}")
-        response = run_conversation(user_input)
-        st.text_area(
-            "Conversation",
-            value="\n".join(
-                [f"You: {m['content']}" if m['role']=='user' else f"AI: {m['content']}" for m in st.session_state.memory]
-            ),
-            height=300
-        )
