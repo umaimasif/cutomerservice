@@ -6,3 +6,6 @@ python-dotenv
 langchain_groq
 litellm
 langchain
+streamlit-webrtc
+speechrecognition
+av
