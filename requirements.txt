@@ -5,3 +5,4 @@ pydub
 python-dotenv
 langchain-google-genai
 litellm
+langchain
