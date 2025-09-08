@@ -126,6 +126,9 @@ if mode == "Text":
 # --------------------------
 # Voice Mode
 # --------------------------
+# --------------------------
+# Voice Mode
+# --------------------------
 elif mode == "Voice":
     import numpy as np
     import av
@@ -136,15 +139,15 @@ elif mode == "Voice":
     # Load Vosk model
     model = Model("model")
 
-    # Persistent list to store audio frames
-    if "audio_frames" not in st.session_state:
-        st.session_state.audio_frames = []
+    # Use a global variable for frames
+    if "audio_frames" not in globals():
+        audio_frames = []
 
     class VoskAudioProcessor(AudioProcessorBase):
         def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
             audio = frame.to_ndarray().flatten()
             audio_int16 = (audio * 32767).astype(np.int16)
-            st.session_state.audio_frames.append(audio_int16)
+            audio_frames.append(audio_int16)
             return frame
 
     # Start WebRTC streaming
@@ -156,12 +159,12 @@ elif mode == "Voice":
         async_processing=True,
     )
 
-    st.info("🎙️ Press 'Transcribe' when done speaking.")
+    st.info("🎙️ Speak continuously. Press 'Transcribe' when done.")
 
     # Transcribe button
     if st.button("Transcribe"):
-        if st.session_state.audio_frames:
-            frames = np.concatenate(st.session_state.audio_frames)
+        if audio_frames:
+            frames = np.concatenate(audio_frames)
             recognizer = KaldiRecognizer(model, 16000)
             recognizer.SetWords(True)
 
@@ -172,6 +175,6 @@ elif mode == "Voice":
                 text = json.loads(recognizer.PartialResult()).get("partial", "")
 
             st.success(f"You said: {text}")
-            st.session_state.audio_frames = []  # clear after processing
+            audio_frames.clear()  # clear after processing
         else:
             st.warning("⚠️ No audio captured yet. Speak and then press 'Transcribe'.")
