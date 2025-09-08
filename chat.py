@@ -42,50 +42,108 @@ def run_conversation(user_input):
 # Voice Input Function
 # ==========================
 # (your imports + GroqLLM + run_conversation stay the same)
+import os
+import wget
+import zipfile
+
+# Make sure model directory exists only once
+if not os.path.exists("model"):
+    url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+    zip_path = "vosk_model.zip"
+
+    # Download
+    wget.download(url, zip_path)
+
+    # Extract
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(".")
+
+    # Rename folder to "model"
+    os.rename("vosk-model-small-en-us-0.15", "model")
+
+    print("✅ Vosk model downloaded and extracted.")
 
 # ==========================
 # Voice Input Function
 # ==========================
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
-import speech_recognition as sr
-import av
+
+
+from vosk import Model, KaldiRecognizer
+import json
 import numpy as np
 
-recognizer = sr.Recognizer()
+# Load Vosk model (make sure "model" folder exists in your project)
+model = Model("model")
+
+def speech_to_text_vosk(frames, sample_rate=16000):
+    """
+    Takes raw audio frames (numpy int16) and transcribes using Vosk.
+    """
+    recognizer = KaldiRecognizer(model, sample_rate)
+    recognizer.SetWords(True)
+
+    # Convert frames into raw bytes
+    audio_bytes = frames.tobytes()
+
+    if recognizer.AcceptWaveform(audio_bytes):
+        result = json.loads(recognizer.Result())
+        return result.get("text", "")
+    else:
+        partial = json.loads(recognizer.PartialResult())
+        return partial.get("partial", "")
+from vosk import Model, KaldiRecognizer
+import json
+import pyaudio
+
+# Ensure Vosk model is downloaded at runtime (add this near the top of your code after imports)
+import os, wget, zipfile
+
+if not os.path.exists("model"):
+    url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+    zip_path = "vosk_model.zip"
+    wget.download(url, zip_path)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(".")
+
+    os.rename("vosk-model-small-en-us-0.15", "model")
+
+# Initialize Vosk model
+model = Model("model")
 
 def speech_to_text():
-    class STTProcessor(AudioProcessorBase):
-        def __init__(self) -> None:
-            self.frames = []
+    rec = KaldiRecognizer(model, 16000)
 
-        def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
-            audio = frame.to_ndarray().flatten()
-            audio_int16 = (audio * 32767).astype("int16")
-            self.frames.append(audio_int16)
-            return frame
+    # Start PyAudio
+    p = pyaudio.PyAudio()
+    stream = p.open(format=pyaudio.paInt16,
+                    channels=1,
+                    rate=16000,
+                    input=True,
+                    frames_per_buffer=8192)
+    stream.start_stream()
 
-    ctx = webrtc_streamer(
-        key="speech-to-text",
-        mode=WebRtcMode.SENDONLY,
-        audio_processor_factory=STTProcessor,
-        media_stream_constraints={"audio": True, "video": False},
-    )
+    st.info("🎙️ Listening... speak now!")
 
-    text = None
-    if ctx.audio_processor and ctx.audio_processor.frames:
-        audio_data = np.concatenate(ctx.audio_processor.frames)
-        audio = sr.AudioData(audio_data.tobytes(), sample_rate=48000, sample_width=2)
+    text = ""
+    while True:
+        data = stream.read(4096, exception_on_overflow = False)
+        if len(data) == 0:
+            break
+        if rec.AcceptWaveform(data):
+            result = json.loads(rec.Result())
+            text = result.get("text", "")
+            break  # stop after first full sentence
 
-        try:
-            text = recognizer.recognize_google(audio, language="en-US")
-        except sr.UnknownValueError:
-            st.warning("⚠️ Could not understand the audio.")
-        except sr.RequestError as e:
-            st.error(f"API error: {e}")
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
-        ctx.audio_processor.frames = []  # clear buffer
-    return text
-
+    if text.strip():
+        return text
+    else:
+        st.warning("⚠️ Could not capture speech.")
+        return None
 
 # ==========================
 # Streamlit UI
