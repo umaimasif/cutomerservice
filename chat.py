@@ -52,14 +52,13 @@ recognizer = sr.Recognizer()
 def speech_to_text():
     class SpeechToTextProcessor(AudioProcessorBase):
         def __init__(self) -> None:
-            self.audio_frames = []
+            self.frames = []
 
         def recv_audio(self, frame: av.AudioFrame) -> av.AudioFrame:
-            # Collect audio frames into a buffer
-            self.audio_frames.append(frame.to_ndarray().flatten())
+            # Convert audio frame to numpy array
+            self.frames.append(frame.to_ndarray().flatten())
             return frame
 
-    # Start mic capture
     ctx = webrtc_streamer(
         key="speech-to-text",
         mode=WebRtcMode.SENDONLY,
@@ -70,25 +69,26 @@ def speech_to_text():
     text = None
     if ctx.audio_processor:
         if st.button("🎙️ Transcribe now"):
-            if ctx.audio_processor.audio_frames:
-                # Combine buffered frames
-                audio_data = np.concatenate(ctx.audio_processor.audio_frames).astype("int16")
+            if ctx.audio_processor.frames:
+                # Use only last 10 seconds of audio to avoid overload
+                audio_data = np.concatenate(ctx.audio_processor.frames[-160000:]).astype("int16")
 
-                # Convert to speech_recognition AudioData
                 audio = sr.AudioData(audio_data.tobytes(), sample_rate=16000, sample_width=2)
 
                 try:
-                    text = recognizer.recognize_google(audio)
+                    text = recognizer.recognize_google(audio, language="en-US")
                     st.success(f"🗣️ You said: {text}")
-                except Exception as e:
-                    st.error(f"Recognition error: {e}")
+                except sr.UnknownValueError:
+                    st.warning("⚠️ Could not understand the audio.")
+                except sr.RequestError as e:
+                    st.error(f"API error: {e}")
 
-                # Reset buffer
-                ctx.audio_processor.audio_frames = []
+                # Clear buffer after processing
+                ctx.audio_processor.frames = []
             else:
-                st.warning("⚠️ No audio captured yet. Please speak into the mic first.")
-
+                st.warning("⚠️ No audio captured yet. Please press 'Start', speak, then press 'Stop'.")
     return text
+
 
 # ==========================
 # Streamlit UI
